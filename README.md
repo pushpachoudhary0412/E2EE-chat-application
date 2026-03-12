@@ -69,11 +69,71 @@ npm run dev
 
 The frontend will start on `http://localhost:5173`
 
-## Usage
+## Testing the Application
 
-1. Open two browser windows/tabs
-2. Each user gets a unique ID (or you can specify one in the URL)
-3. Start chatting - messages are automatically encrypted/decrypted
+### Quick Start
+
+1. **Start the Backend Server**
+   ```bash
+   cd E2EE_Chat_App/backend/ChatApp.Backend
+   dotnet run
+   ```
+   Backend will be running on `http://localhost:5214`
+
+2. **Start the Frontend Server** (in a new terminal)
+   ```bash
+   cd E2EE_Chat_App/frontend
+   npm run dev
+   ```
+   Frontend will be running on `http://localhost:5173`
+
+3. **Open Two Browser Tabs**
+   - Tab 1: Navigate to `http://localhost:5173`
+   - Tab 2: Navigate to `http://localhost:5173` (new tab/window)
+
+4. **Each Tab Generates a Different User ID**
+   - Each tab automatically generates a unique user ID (e.g., `user-abc123`)
+   - You'll see your user ID displayed in the header
+
+5. **Send Messages Between Tabs**
+   - Type a message in Tab 1 and click Send
+   - The message appears encrypted on the server, but decrypted in Tab 2
+   - Try typing in Tab 2 to see the typing indicator in Tab 1
+
+### Features to Test
+
+#### ✅ End-to-End Encryption
+- Messages are encrypted client-side before being sent
+- Only the recipient can decrypt the messages
+- Server never sees plaintext content
+
+#### ✅ Typing Indicators
+- Start typing in one tab
+- See the purple "✍️ typing..." badge appear in the other tab
+- Indicator disappears 1 second after you stop typing
+
+#### ✅ Presence Status
+- **Green "ONLINE"**: User is connected and active
+- **Orange "INACTIVE"**: User has been idle for 2 minutes
+- **Gray "OFFLINE"**: User disconnected (close one tab to test)
+
+#### ✅ Automatic Inactivity Detection
+- Don't interact with one tab for 2 minutes
+- Watch the status change to "INACTIVE" in the other tab
+- Move your mouse or type to return to "ONLINE"
+
+#### ✅ Real-Time Communication
+- Messages appear instantly in both tabs
+- All communication happens through WebSocket (SignalR)
+- No page refresh needed
+
+### Testing Encryption
+
+Open your browser's Developer Tools (F12) and:
+1. Go to the **Network** tab
+2. Filter for WebSocket/SignalR connections
+3. Send a message
+4. Inspect the transmitted data - you'll see encrypted content, not plaintext
 
 ## Message Protocol
 
