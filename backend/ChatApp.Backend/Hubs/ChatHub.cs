@@ -1,18 +1,41 @@
-using Microsoft.AspNetCore.SignalR;
 using ChatApp.Backend.Models;
+using Microsoft.AspNetCore.SignalR;
 using System.Collections.Concurrent;
 
 namespace ChatApp.Backend.Hubs;
 
 public class ChatHub : Hub
 {
-    private static readonly ConcurrentDictionary<string, string> _userConnections = new();
-    private static readonly ConcurrentDictionary<string, PresenceStatus> _userPresence = new();
+    private static readonly ConcurrentDictionary<string, string> UserByConnectionId = new();
+    private static readonly ConcurrentDictionary<string, ConcurrentDictionary<string, byte>> ConnectionsByUserId = new();
+    private static readonly ConcurrentDictionary<string, PresenceStatus> PresenceByUserId = new();
+    private static readonly HashSet<string> AllowedMessageTypes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "connect",
+        "handshake",
+        "chat",
+        "typing",
+        "error"
+    };
+    private static readonly HashSet<string> AllowedPresenceStatuses = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "online",
+        "offline",
+        "inactive"
+    };
 
     public override async Task OnConnectedAsync()
     {
-        var userId = Context.GetHttpContext()?.Request.Query["userId"].ToString() ?? Guid.NewGuid().ToString();
-        _userConnections[Context.ConnectionId] = userId;
+        var userId = Context.GetHttpContext()?.Request.Query["userId"].ToString();
+        if (string.IsNullOrWhiteSpace(userId))
+        {
+            Context.Abort();
+            return;
+        }
+
+        UserByConnectionId[Context.ConnectionId] = userId;
+        var connections = ConnectionsByUserId.GetOrAdd(userId, _ => new ConcurrentDictionary<string, byte>());
+        connections[Context.ConnectionId] = 0;
 
         var presence = new PresenceStatus
         {
@@ -20,7 +43,12 @@ public class ChatHub : Hub
             Status = "online",
             LastSeen = DateTime.UtcNow
         };
-        _userPresence[userId] = presence;
+        PresenceByUserId[userId] = presence;
+
+        foreach (var existingPresence in PresenceByUserId.Values.Where(p => p.UserId != userId))
+        {
+            await Clients.Caller.SendAsync("UserPresence", existingPresence);
+        }
 
         await Clients.Others.SendAsync("UserPresence", presence);
         await base.OnConnectedAsync();
@@ -28,60 +56,170 @@ public class ChatHub : Hub
 
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
-        if (_userConnections.TryRemove(Context.ConnectionId, out var userId))
+        if (!UserByConnectionId.TryRemove(Context.ConnectionId, out var userId))
         {
-            if (_userPresence.TryGetValue(userId, out var presence))
+            await base.OnDisconnectedAsync(exception);
+            return;
+        }
+
+        if (ConnectionsByUserId.TryGetValue(userId, out var connections))
+        {
+            connections.TryRemove(Context.ConnectionId, out _);
+            if (connections.IsEmpty)
             {
-                presence.Status = "offline";
-                presence.LastSeen = DateTime.UtcNow;
-                await Clients.Others.SendAsync("UserPresence", presence);
+                ConnectionsByUserId.TryRemove(userId, out _);
+
+                if (PresenceByUserId.TryGetValue(userId, out var presence))
+                {
+                    presence.Status = "offline";
+                    presence.LastSeen = DateTime.UtcNow;
+                    await Clients.Others.SendAsync("UserPresence", presence);
+                }
             }
         }
+
         await base.OnDisconnectedAsync(exception);
     }
 
     public async Task SendMessage(ChatMessage message)
     {
-        // Validate message format
-        if (string.IsNullOrEmpty(message.SenderId) ||
-            message.Data == null)
+        if (!TryValidateMessage(message, out var error))
         {
-            await Clients.Caller.SendAsync("ReceiveError", new ErrorMessage
+            await SendProtocolErrorToCaller(error);
+            return;
+        }
+
+        if (!UserByConnectionId.TryGetValue(Context.ConnectionId, out var connectedUserId) ||
+            !string.Equals(connectedUserId, message.SenderId, StringComparison.Ordinal))
+        {
+            await SendProtocolErrorToCaller(new ErrorMessage
             {
-                ErrorCode = "INVALID_MESSAGE",
-                Message = "Message format is invalid"
+                ErrorCode = "SENDER_MISMATCH",
+                Message = "Sender ID does not match the connected user."
             });
             return;
         }
 
-        // Server doesn't decrypt - just forwards the encrypted data
-        await Clients.Others.SendAsync("ReceiveMessage", message);
-    }
+        var recipientClients = GetClientsForUser(message.ReceiverId);
+        if (recipientClients is null)
+        {
+            if (string.Equals(message.Type, "connect", StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
 
-    public async Task SendTyping(string userId)
-    {
-        Console.WriteLine($"[ChatHub] SendTyping called by userId: {userId}");
-        await Clients.Others.SendAsync("UserTyping", userId);
-        Console.WriteLine($"[ChatHub] Broadcasted UserTyping event to others");
-    }
+            await SendProtocolErrorToCaller(new ErrorMessage
+            {
+                ErrorCode = "RECIPIENT_OFFLINE",
+                Message = "Recipient is not connected."
+            });
+            return;
+        }
 
-    public async Task StopTyping(string userId)
-    {
-        Console.WriteLine($"[ChatHub] StopTyping called by userId: {userId}");
-        await Clients.Others.SendAsync("UserStoppedTyping", userId);
-        Console.WriteLine($"[ChatHub] Broadcasted UserStoppedTyping event to others");
+        await recipientClients.SendAsync("ReceiveMessage", message);
     }
 
     public async Task UpdatePresence(string status)
     {
-        if (_userConnections.TryGetValue(Context.ConnectionId, out var userId))
+        if (string.IsNullOrWhiteSpace(status) || !AllowedPresenceStatuses.Contains(status))
         {
-            if (_userPresence.TryGetValue(userId, out var presence))
+            await SendProtocolErrorToCaller(new ErrorMessage
             {
-                presence.Status = status;
-                presence.LastSeen = DateTime.UtcNow;
-                await Clients.Others.SendAsync("UserPresence", presence);
-            }
+                ErrorCode = "INVALID_PRESENCE",
+                Message = "Presence status is invalid."
+            });
+            return;
         }
+
+        if (UserByConnectionId.TryGetValue(Context.ConnectionId, out var userId) &&
+            PresenceByUserId.TryGetValue(userId, out var presence))
+        {
+            presence.Status = status;
+            presence.LastSeen = DateTime.UtcNow;
+            await Clients.Others.SendAsync("UserPresence", presence);
+        }
+    }
+
+    private static bool TryValidateMessage(ChatMessage? message, out ErrorMessage error)
+    {
+        if (message is null)
+        {
+            error = new ErrorMessage
+            {
+                ErrorCode = "INVALID_MESSAGE",
+                Message = "Message payload is missing."
+            };
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(message.Type) ||
+            !AllowedMessageTypes.Contains(message.Type))
+        {
+            error = new ErrorMessage
+            {
+                ErrorCode = "INVALID_TYPE",
+                Message = "Message type is invalid."
+            };
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(message.SenderId))
+        {
+            error = new ErrorMessage
+            {
+                ErrorCode = "INVALID_SENDER",
+                Message = "Sender ID is required."
+            };
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(message.ReceiverId))
+        {
+            error = new ErrorMessage
+            {
+                ErrorCode = "INVALID_RECEIVER",
+                Message = "Receiver ID is required."
+            };
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(message.Data))
+        {
+            error = new ErrorMessage
+            {
+                ErrorCode = "INVALID_DATA",
+                Message = "Message data is required."
+            };
+            return false;
+        }
+
+        error = new ErrorMessage();
+        return true;
+    }
+
+    private IClientProxy? GetClientsForUser(string userId)
+    {
+        if (!ConnectionsByUserId.TryGetValue(userId, out var connections) || connections.IsEmpty)
+        {
+            return null;
+        }
+
+        return Clients.Clients(connections.Keys);
+    }
+
+    private Task SendProtocolErrorToCaller(ErrorMessage error)
+    {
+        UserByConnectionId.TryGetValue(Context.ConnectionId, out var userId);
+
+        return Clients.Caller.SendAsync("ReceiveMessage", new ChatMessage
+        {
+            Type = "error",
+            SenderId = "server",
+            ReceiverId = userId ?? "unknown",
+            Data = $$"""
+                     {"errorCode":"{{error.ErrorCode}}","message":"{{error.Message}}"}
+                     """,
+            Timestamp = DateTime.UtcNow
+        });
     }
 }
