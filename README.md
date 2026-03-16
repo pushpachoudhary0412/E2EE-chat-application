@@ -1,31 +1,67 @@
 # E2EE Chat Application
 
-A one-to-one real-time chat app built with ASP.NET Core, SignalR, Vue 3, and the browser Web Crypto API. Chat messages are encrypted in the browser before they leave the sender, and the server only routes encrypted payloads.
+A one-to-one real-time chat app built with **ASP.NET Core + SignalR** (backend) and **Vue 3 + TypeScript** (frontend), using the browser **Web Crypto API** for end-to-end encryption.
 
-## Features
+The core design goal is simple:
 
-- One-to-one real-time chat over SignalR
-- Browser-side end-to-end encryption using ECDH + AES-GCM
-- Tamper detection through AES-GCM authenticated decryption
-- Online, offline, and inactive presence states
-- Typing indicators routed to the active peer only
-- Server-side validation for invalid messages and bad receivers
+> Chat plaintext is encrypted in the sender browser and decrypted only in the receiver browser. The server only routes protocol envelopes and encrypted payloads.
 
-## Stack
+---
 
-- Backend: ASP.NET Core / C#
-- Frontend: Vue 3 + TypeScript + Vite
-- Real-time transport: SignalR
-- Crypto: Web Crypto API
+## 1) Project Highlights
 
-## How To Run
+- Real-time one-to-one communication
+- End-to-end encrypted message transport
+- Authenticated decryption failure on tampering
+- Presence (`online`, `offline`, `inactive`) and typing indicators
+- Defensive protocol validation (client + server)
+
+This repository is intentionally a clear challenge implementation, not a full production messenger.
+
+---
+
+## 2) Tech stack
+
+- **Backend:** ASP.NET Core (.NET 10), C#
+- **Realtime transport:** SignalR hub
+- **Frontend:** Vue 3, TypeScript, Vite
+- **Crypto:** Web Crypto API (`ECDH P-256`, `AES-GCM 256-bit`)
+- **Tests:** xUnit (`dotnet test`) + Vitest
+
+---
+
+## 3) Project structure
+
+```text
+backend/
+  ChatApp.Backend/
+    Hubs/ChatHub.cs
+    Models/Message.cs
+    Program.cs
+  ChatApp.Backend.Tests/
+    ChatHubTests.cs
+
+frontend/
+  src/components/Chat.vue
+  src/services/ChatService.ts
+  src/utils/crypto.ts
+  src/utils/crypto.test.ts
+  src/utils/protocol.test.ts
+
+shared/
+  types.ts
+```
+
+---
+
+## 4) Getting Started (Run the App Locally)
 
 ### Prerequisites
 
-- .NET SDK 10.0 or later
-- Node.js 18 or later
+- .NET SDK 10.0+
+- Node.js 18+
 
-### Backend
+### Run backend
 
 ```bash
 cd backend/ChatApp.Backend
@@ -33,9 +69,9 @@ dotnet restore
 dotnet run
 ```
 
-The backend listens on `http://localhost:5214`.
+Backend URL: `http://localhost:5214`
 
-### Frontend
+### Run frontend
 
 ```bash
 cd frontend
@@ -43,132 +79,159 @@ npm install
 npm run dev
 ```
 
-The frontend runs on `http://localhost:5173`.
+Frontend URL: `http://localhost:5173`
 
-## Using The Chat
+### Open two users
 
-Open two browser tabs and configure opposite user IDs:
+Use two tabs/windows:
 
-- Tab 1: `alice` talking to `bob`
-- Tab 2: `bob` talking to `alice`
+- User A: `http://localhost:5173/?user=alice&peer=bob`
+- User B: `http://localhost:5173/?user=bob&peer=alice`
 
-You can either:
+After both connect, a handshake runs automatically and secure messaging is enabled.
 
-- Use the setup form shown on first load, or
-- Open direct URLs such as `http://localhost:5173/?user=alice&peer=bob` and `http://localhost:5173/?user=bob&peer=alice`
+---
 
-Once both peers are connected, they exchange public keys through a handshake message and the UI enables encrypted chat input.
+## 5) Message format (simple explanation)
 
-## Message Format
+Every message sent in the app has the same basic fields:
 
-All SignalR chat messages use this shape:
+- **type** → what kind of event it is
+- **senderId** → who sent it
+- **receiverId** → who should receive it
+- **data** → the actual content for that event
+- **timestamp** → when it was created
 
-```ts
-type MessageType = 'connect' | 'handshake' | 'chat' | 'typing' | 'error';
+The `type` can be one of these:
 
-interface ChatMessage {
-  type: MessageType;
-  senderId: string;
-  receiverId: string;
-  data: string;
-  timestamp: string | Date;
-}
-```
+- `connect` → tells the peer “I’m connected”
+- `handshake` → shares public key info to create the secure session
+- `chat` → carries the encrypted chat payload
+- `typing` → tells the peer typing started/stopped
+- `error` → safe protocol error returned by server
 
-Usage by message type:
+For normal understanding, that’s enough: **the same envelope is reused for all events, and only the `data` content changes by type**.
 
-- `connect`: `data` contains JSON like `{"status":"connected"}` and is used as a peer-to-peer protocol signal
-- `handshake`: `data` contains JSON with the sender public key and a `reply` flag
-- `chat`: `data` contains JSON with encrypted payload fields (`ciphertext`, `iv`, `tag`)
-- `typing`: `data` contains JSON like `{"isTyping":true}` or `{"isTyping":false}`
-- `error`: `data` contains JSON with `errorCode` and `message`
+Presence (`online`, `offline`, `inactive`) is sent separately through the `UserPresence` event.
 
-All of these protocol messages are routed through the same SignalR hub method and the same `ReceiveMessage` client event. Presence updates remain a separate status stream because they are not part of the encrypted chat protocol.
+### Quick message type guide
 
-## Encryption Approach
+| Message Type | Purpose |
+| --- | --- |
+| `connect` | Starts peer session signal (“I’m connected”). |
+| `handshake` | Exchanges public key information to establish a secure session. |
+| `chat` | Carries encrypted chat payload (`ciphertext` + `iv`). |
+| `typing` | Sends typing on/off state to the peer. |
+| `error` | Returns safe protocol errors from server validation. |
 
-The app uses an ephemeral per-session key exchange:
+> If you want full developer-level schema details, see `shared/types.ts`.
 
-1. Each browser generates an ECDH P-256 key pair.
-2. The two peers exchange public keys through SignalR handshake messages.
-3. Each side derives the same AES-GCM 256-bit shared secret locally.
-4. Chat text is encrypted in the browser with a fresh IV for every message.
-5. The recipient decrypts locally. If the ciphertext or IV was changed, AES-GCM decryption fails and the message is rejected.
+---
 
-### What The Server Can See
+## 6) Encryption design (how E2EE works here)
 
-The server can see:
+### Key agreement and secure channel
+
+1. Each client generates an ephemeral `ECDH P-256` key pair in the browser.
+2. Peers exchange public keys via `handshake` messages.
+3. Each client derives the same shared secret locally.
+4. Shared secret is used as an `AES-GCM` key for chat message encryption/decryption.
+
+### Message encryption
+
+- Each outgoing chat message uses a fresh random 12-byte IV.
+- Plaintext is encrypted locally before send.
+- Receiver decrypts locally.
+
+### Tamper detection
+
+`AES-GCM` provides authenticated encryption. If ciphertext/IV is altered, decrypt fails and message is rejected.
+
+### What server can/cannot see
+
+Server can see:
 
 - sender and receiver IDs
-- message type
+- message types
 - encrypted payload bytes
-- presence and typing events
+- presence/typing metadata
 
-The server cannot read plaintext chat content because it never receives the shared secret.
+Server cannot see:
 
-## Limits
+- chat plaintext
+- shared secret keys
 
-- Keys live only in memory, so refreshing or reconnecting requires a new handshake.
-- There is no identity verification beyond user IDs, so this is not resistant to active impersonation or man-in-the-middle attacks.
-- Messages are not stored for offline delivery.
-- The server still sees metadata such as who is talking to whom and when.
-- AES-GCM provides integrity for encrypted chat payloads, but this demo does not include signed identity keys or a trust-on-first-use flow.
+---
 
-## Testing
+## 7) Reliability and validation behavior
 
-### Crypto tests
+- Hub validates message type and required fields (`type`, `senderId`, `receiverId`, `data`).
+- Sender identity is checked against connection mapping.
+- Offline recipient handling returns safe protocol errors.
+- Disconnects update presence state and do not crash hub.
+- Client performs runtime validation/parsing for protocol payloads and rejects malformed JSON safely.
+
+---
+
+## 8) Testing
+
+### Frontend tests (Vitest)
 
 ```bash
 cd frontend
 npm run test:run
 ```
 
-The crypto tests cover:
+Covers:
 
-- encrypt -> decrypt round trips
+- crypto round-trip
 - invalid key handling
-- tamper detection for ciphertext and IV
-- decryption failure with the wrong shared key
+- tamper detection (ciphertext/IV)
+- wrong-key decryption failure
+- protocol parsing/validation and malformed payload rejection
 
-### Backend hub tests
-
-```bash
-/Users/pushpa/.dotnet/dotnet test E2EE_Chat_App.sln
-```
-
-The backend tests cover:
-
-- invalid message types are rejected safely
-- missing or mismatched sender state returns errors
-- offline recipients return safe errors
-- connect and typing envelopes are forwarded correctly
-- valid chat messages are forwarded only to the intended recipient
-- invalid presence updates are rejected
-- disconnecting the last connection marks the user offline without crashing
-
-### Protocol validation tests
-
-The frontend test suite also covers runtime protocol validation:
-
-- valid message envelopes round-trip through runtime guards
-- malformed JSON handshake payloads are rejected safely
-- encrypted payloads missing required fields are rejected safely
-- invalid presence payloads are rejected safely
-
-### Build checks
+### Backend tests (xUnit)
 
 ```bash
-cd frontend
-npm run build
-
-cd ../backend/ChatApp.Backend
-/Users/pushpa/.dotnet/dotnet build
+/Users/pushpa/.dotnet/dotnet test /Users/pushpa/Desktop/E2EE_Chat_App/E2EE_Chat_App.sln
 ```
 
-## What I Would Improve Next
+Covers:
 
-- Add signed long-term identity keys and fingerprint verification
-- Add Playwright-based two-tab integration tests
-- Support offline message queues with encrypted persistence
-- Add explicit delivery acknowledgements instead of inferred status
-- Replace the demo setup screen with authenticated users and contact selection
+- invalid message rejection
+- sender mismatch handling
+- recipient offline handling
+- chat/connect/typing forwarding
+- presence update validation
+- disconnect/offline transitions
+
+### Optional build checks
+
+```bash
+cd frontend && npm run build
+cd ../backend/ChatApp.Backend && /Users/pushpa/.dotnet/dotnet build
+```
+
+---
+
+## 9) Known limits (important)
+
+- Keys are in-memory only (refresh/reconnect requires new handshake).
+- No long-term identity verification (not MITM-resistant yet).
+- No encrypted offline message persistence.
+- Metadata visibility remains at server level (who talks to whom, when).
+- Single-instance in-memory presence/routing state on backend.
+
+---
+
+## 10) What I would improve next
+
+1. Add signed long-term identity keys + fingerprint verification.
+2. Add explicit message IDs and delivery ACK protocol.
+3. Add Playwright two-client integration tests.
+4. Add encrypted offline persistence and replay sync.
+5. Replace query-string demo identities with authenticated users.
+6. Add rate limits and payload-size safeguards.
+
+---
+

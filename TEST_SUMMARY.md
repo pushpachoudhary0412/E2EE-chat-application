@@ -2,123 +2,114 @@
 
 ## Test Overview
 
-**Total Tests:** 11 critical security tests  
-**Status:** ✅ All Passing  
-**Test Runner:** Vitest v4.0.18  
-**Focus:** Core encryption and security validation
+**Current Status:** ✅ All automated tests passing  
+**Frontend Test Runner:** Vitest v4.0.18  
+**Backend Test Runner:** `dotnet test` (xUnit)  
+**Latest Verified Counts:**
+
+- Frontend: **22 passed** (2 files)
+  - `crypto.test.ts`: 11 tests
+  - `protocol.test.ts`: 11 tests
+- Backend: **10 passed** (Hub behavior tests)
+
+**Total:** **32 passing tests**
 
 ---
 
-## Test Suite: Crypto Service Tests (`crypto.test.ts`)
+## Frontend Test Suites
 
-**11 Tests** - Critical security and encryption functionality
+### 1) Crypto Service Tests (`frontend/src/utils/crypto.test.ts`)
 
-### Key Generation & Exchange (2 tests)
-- ✅ Generate ECDH P-256 key pairs
-- ✅ Derive shared secret for both parties
+**11 Tests** covering ECDH + AES-GCM behavior and tamper safety:
 
-### Invalid Key Handling (1 test)
-- ✅ Fail to import invalid public key
+- ✅ Key generation and key exchange flow
+- ✅ Public key import/export validation
+- ✅ Encrypt → decrypt round-trip correctness
+- ✅ Unicode and emoji message support
+- ✅ Unique IV behavior per message
+- ✅ Tampered ciphertext rejection
+- ✅ Tampered IV rejection
+- ✅ Wrong shared key rejection
+- ✅ AES-GCM authentication integrity checks
+- ✅ Basic performance sanity check (multiple messages)
 
-### Encryption & Decryption (3 tests)
-- ✅ Encrypt and decrypt simple messages
-- ✅ Encrypt and decrypt messages with special characters
-- ✅ Encrypt and decrypt Unicode messages (多语言支持 👍 ❤️ 😂)
+### 2) Protocol Validation Tests (`frontend/src/utils/protocol.test.ts`)
 
-### Message Integrity & Tamper Detection (4 tests)
-- ✅ Fail to decrypt tampered ciphertext
-- ✅ Fail to decrypt with tampered IV
-- ✅ Fail to decrypt with wrong shared secret
-- ✅ Verify message authenticity with AES-GCM authentication tag
+**11 Tests** covering message/payload parsing and safe rejection:
 
-### Performance (1 test)
-- ✅ Encrypt and decrypt 50 messages in < 3 seconds
+- ✅ Valid message envelope acceptance
+- ✅ Invalid message type rejection
+- ✅ Connect payload parsing
+- ✅ Handshake payload parsing + malformed JSON rejection
+- ✅ Encrypted payload parsing + missing field rejection
+- ✅ Typing payload parsing
+- ✅ Protocol error payload parsing
+- ✅ Presence payload validation and invalid status rejection
+
+---
+
+## Backend Test Suite
+
+### Chat Hub Tests (`backend/ChatApp.Backend.Tests/ChatHubTests.cs`)
+
+**10 Tests** covering hub validation, routing, presence, and disconnect behavior:
+
+- ✅ Invalid message type handled safely
+- ✅ Sender mismatch returns safe protocol error
+- ✅ Offline recipient returns safe protocol error
+- ✅ Valid chat envelope forwarded only to intended recipient
+- ✅ Connect envelope forwarded correctly
+- ✅ Typing envelope forwarded correctly
+- ✅ Invalid presence update rejected safely
+- ✅ Valid presence update broadcast correctly
+- ✅ Last-disconnect presence set to offline
+- ✅ Unknown disconnect does not crash
 
 ---
 
 ## Running Tests
 
-### Run all tests
+### Frontend
 ```bash
-npm test
-```
-
-### Run tests once
-```bash
+cd frontend
 npm run test:run
 ```
 
-### Run tests with UI
+### Backend
 ```bash
-npm run test:ui
-```
-
-### Run tests with coverage
-```bash
-npm run test:coverage
+/Users/pushpa/.dotnet/dotnet test /Users/pushpa/Desktop/E2EE_Chat_App/E2EE_Chat_App.sln
 ```
 
 ---
 
-## Security Coverage
+## Security & Protocol Coverage Summary
 
-All critical security tests are passing:
+All required challenge validation areas are currently covered by automated tests:
 
-✅ **Encryption Strength:** AES-GCM 256-bit authenticated encryption  
-✅ **Key Exchange:** ECDH P-256 elliptic curve  
-✅ **Tamper Detection:** Ciphertext and IV integrity verification  
-✅ **Authentication:** GCM authentication tag validation  
-✅ **Wrong Key Detection:** Fails safely with incorrect decryption keys  
-✅ **IV Randomization:** Different IV for each message (implicit)  
-✅ **Unicode Support:** Handles international characters and emoji  
+- ✅ Encrypt/decrypt round-trip correctness
+- ✅ Tamper detection (ciphertext/IV/auth integrity)
+- ✅ Safe handling of invalid protocol messages
+- ✅ Message envelope validation and JSON parsing safety
+- ✅ Hub-side validation and defensive error routing
 
 ---
 
-## Test Philosophy
+## Latest Test Execution Snapshot
 
-This streamlined test suite focuses exclusively on **critical security functionality**:
-
-1. **Key Exchange Security** - Validates ECDH key generation and shared secret derivation
-2. **Encryption Correctness** - Verifies AES-GCM encryption/decryption works properly
-3. **Tamper Detection** - Ensures any tampering with ciphertext or IV is detected
-4. **Authentication** - Confirms GCM authentication prevents unauthorized decryption
-5. **Performance** - Validates encryption remains performant under load
-
-**Removed:** Edge case validation, message protocol tests, and non-security functionality tests to maintain focus on core encryption security.
-
----
-
-## Next Steps
-
-### For Production Readiness
-1. **Integration Tests**
-   - SignalR connection with encryption
-   - Multi-user key exchange scenarios
-   - Real-time encrypted message flow
-
-2. **E2E Tests**
-   - Full chat flow with Playwright
-   - Browser-based encryption testing
-   - Multi-tab/multi-user scenarios
-
-3. **Security Audit**
-   - Professional cryptographic review
-   - Penetration testing
-   - Key management audit
-
----
-
-## Test Execution Example
-
+### Frontend (Vitest)
 ```
- RUN  v4.0.18 /Users/pushpa/Desktop/E2EE_Chat_App/frontend
+RUN  v4.0.18 /Users/pushpa/Desktop/E2EE_Chat_App/frontend
 
- ✓ src/utils/crypto.test.ts (11 tests) 45ms
+✓ src/utils/protocol.test.ts (11 tests)
+✓ src/utils/crypto.test.ts (11 tests)
 
- Test Files  1 passed (1)
-      Tests  11 passed (11)
-   Start at  12:12:15
-   Duration  ~500ms
+Test Files  2 passed (2)
+     Tests  22 passed (22)
 ```
 
-**All critical security tests passing! ✅**
+### Backend (`dotnet test`)
+```
+Passed! - Failed: 0, Passed: 10, Skipped: 0, Total: 10
+```
+
+**Overall: 32/32 tests passing ✅**
