@@ -1,6 +1,8 @@
 # Backend
 backend/ChatApp.Backend/bin/
 backend/ChatApp.Backend/obj/
+backend/ChatApp.Backend.Tests/bin/
+backend/ChatApp.Backend.Tests/obj/
 backend/ChatApp.Backend/Properties/launchSettings.json
 
 # Frontend
