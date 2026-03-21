@@ -136,9 +136,12 @@ Presence (`online`, `offline`, `inactive`) is sent separately through the `UserP
 ### Key agreement and secure channel
 
 1. Each client generates an ephemeral `ECDH P-256` key pair in the browser.
-2. Peers exchange public keys via `handshake` messages.
-3. Each client derives the same shared secret locally.
-4. Shared secret is used as an `AES-GCM` key for chat message encryption/decryption.
+2. One peer deterministically initiates the handshake first, and the other peer responds.
+3. Peers exchange public keys via `handshake` messages.
+4. Each client derives the same shared secret locally.
+5. Shared secret is used as an `AES-GCM` key for chat message encryption/decryption.
+
+The initiator is chosen deterministically from the two demo user IDs so both tabs do not start overlapping handshakes at the same time. This keeps the protocol stable while still producing the same shared secret on both sides.
 
 ### Message encryption
 
@@ -229,6 +232,7 @@ cd ../backend/ChatApp.Backend && dotnet build
 - No encrypted offline message persistence.
 - Metadata visibility remains at server level (who talks to whom, when).
 - Single-instance in-memory presence/routing state on backend.
+- Current routing is optimized for one active receiver connection per user rather than multi-device fan-out.
 
 ---
 
@@ -243,6 +247,7 @@ cd ../backend/ChatApp.Backend && dotnet build
 
 3. **Secure handshake**
    - Each client creates ephemeral ECDH keys (`frontend/src/utils/crypto.ts`).
+   - Exactly one side initiates the handshake, and the peer responds with its public key.
    - Clients exchange public keys through `handshake` protocol messages.
    - Both derive the same shared AES-GCM key locally.
 
@@ -253,7 +258,7 @@ cd ../backend/ChatApp.Backend && dotnet build
 
 5. **Hub validation and routing**
    - `backend/ChatApp.Backend/Hubs/ChatHub.cs` validates envelope fields, message type, payload size, sender mapping, and recipient status.
-   - If valid, it routes message only to intended receiver connection(s); otherwise returns safe `error` envelope.
+   - If valid, it routes the message only to the intended receiver connection; otherwise returns a safe `error` envelope.
 
 6. **Receiving and decrypting**
    - Receiver `ChatService` validates envelope using shared protocol types (`shared/types.ts`).
@@ -281,10 +286,10 @@ cd ../backend/ChatApp.Backend && dotnet build
 
 ## 11) What I would improve next
 
-1. Replace query-string demo users with proper authentication (login + token/session-based identity).
-2. Add persistent encrypted chat history (e.g., IndexedDB) so messages survive refresh/reconnect.
-3. Extend one-to-one chat into optional group chat using room-based messaging and membership handling.
-4. Enhance messaging capabilities with encrypted file/image attachments, message edit/delete support, and chat history search/filter.
+1. Add long-term identity keys and fingerprint verification so peers can detect impersonation or man-in-the-middle attacks.
+2. Add end-to-end browser integration tests that simulate two tabs performing handshake, encrypted messaging, typing, and reconnect flows.
+3. Improve delivery robustness with encrypted local persistence and support for multiple active devices per user instead of a single primary receiver connection.
+4. Replace demo query-string identities with authenticated user accounts and a proper session/token-based identity model.
+5. Add richer messaging features such as encrypted attachments and searchable chat history.
 
 ---
-

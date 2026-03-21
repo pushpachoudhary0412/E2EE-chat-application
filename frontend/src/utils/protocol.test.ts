@@ -51,6 +51,19 @@ describe('protocol validation', () => {
     ).toThrow('messageId is required for chat and ack messages.');
   });
 
+  it('accepts null messageId for non-chat protocol messages', () => {
+    const message = validateChatMessage({
+      type: 'handshake',
+      senderId: 'alice',
+      receiverId: 'bob',
+      data: '{"publicKey":"abc","reply":false}',
+      messageId: null,
+      timestamp: new Date().toISOString()
+    });
+
+    expect(message.messageId).toBeUndefined();
+  });
+
   it('rejects oversized payloads', () => {
     expect(() =>
       validateChatMessage({

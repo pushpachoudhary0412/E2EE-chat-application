@@ -20,6 +20,7 @@ public class ChatMessage
     public string Data { get; set; } = string.Empty; // Encrypted for chat messages
 
     [JsonPropertyName("messageId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? MessageId { get; set; }
 
     [JsonPropertyName("timestamp")]

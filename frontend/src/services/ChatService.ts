@@ -134,6 +134,11 @@ export class ChatService {
 
         if (validatedMessage.type === 'error') {
           const errorPayload: ProtocolErrorPayload = parseProtocolErrorPayload(validatedMessage.data);
+
+          if (errorPayload.errorCode === 'RECIPIENT_OFFLINE' && !this.handshakeComplete) {
+            this.handshakeStarted = false;
+          }
+
           this.onError?.(errorPayload.message);
           return;
         }
@@ -144,7 +149,10 @@ export class ChatService {
 
         if (validatedMessage.type === 'connect') {
           const connectPayload: ConnectPayload = parseConnectPayload(validatedMessage.data);
-          if (connectPayload.status === 'connected' && !this.handshakeStarted && !this.handshakeComplete) {
+          if (connectPayload.status === 'connected' &&
+              !this.handshakeComplete &&
+              this.shouldInitiateHandshake()) {
+            this.handshakeStarted = false;
             await this.initiateHandshake();
           }
           return;
@@ -204,6 +212,15 @@ export class ChatService {
         ...validatedPresence,
         lastSeen: new Date(validatedPresence.lastSeen)
       });
+
+      if (!this.handshakeComplete &&
+          (validatedPresence.status === 'online' || validatedPresence.status === 'inactive') &&
+          this.shouldInitiateHandshake()) {
+        this.handshakeStarted = false;
+        void this.initiateHandshake().catch((error) => {
+          console.error('Failed to initiate handshake after presence update:', error);
+        });
+      }
     });
 
     this.connection.onreconnected(() => {
@@ -213,7 +230,9 @@ export class ChatService {
       void this.cryptoService.generateKeyPair()
         .then(async () => {
           await this.sendProtocolMessage('connect', { status: 'connected' });
-          await this.initiateHandshake();
+          if (this.shouldInitiateHandshake()) {
+            await this.initiateHandshake();
+          }
         })
         .catch((error) => {
           console.error('Failed to re-establish secure session:', error);
@@ -240,7 +259,9 @@ export class ChatService {
     const handshakeData: HandshakePayload = parseHandshakePayload(message.data);
     const otherUserPublicKey = await this.cryptoService.importPublicKey(handshakeData.publicKey);
     this.sharedSecret = await this.cryptoService.deriveSharedSecret(otherUserPublicKey);
+    const handshakeWasComplete = this.handshakeComplete;
     this.handshakeComplete = true;
+    this.handshakeStarted = true;
 
     if (!handshakeData.reply) {
       const publicKey = await this.cryptoService.exportPublicKey();
@@ -250,7 +271,9 @@ export class ChatService {
       });
     }
 
-    this.onHandshakeComplete?.();
+    if (!handshakeWasComplete) {
+      this.onHandshakeComplete?.();
+    }
   }
 
   private async sendProtocolMessage(
@@ -289,5 +312,11 @@ export class ChatService {
     }
 
     return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  }
+
+  private shouldInitiateHandshake(): boolean {
+    // Pick a single deterministic initiator so both peers do not start
+    // overlapping handshake exchanges and derive mismatched session keys.
+    return this.userId.localeCompare(this.otherUserId) < 0;
   }
 }

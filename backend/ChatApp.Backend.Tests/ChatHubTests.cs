@@ -400,7 +400,15 @@ public class ChatHubTests
         public IClientProxy Caller => caller;
         public IClientProxy Others => others;
         public IClientProxy AllExcept(IReadOnlyList<string> excludedConnectionIds) => throw new NotSupportedException();
-        public IClientProxy Client(string connectionId) => throw new NotSupportedException();
+        public IClientProxy Client(string connectionId)
+        {
+            if (routedClients is null || !routedClients.TryGetValue(connectionId, out var proxy))
+            {
+                return new MultiClientProxy([]);
+            }
+
+            return proxy;
+        }
         public IClientProxy Clients(IReadOnlyList<string> connectionIds)
         {
             if (routedClients is null)
@@ -408,6 +416,8 @@ public class ChatHubTests
                 return others;
             }
 
+            // Mirror SignalR fan-out by resolving each requested connection ID
+            // to the recording proxy that represents that recipient.
             var proxies = connectionIds
                 .Select(connectionId => routedClients.TryGetValue(connectionId, out var proxy) ? proxy : null)
                 .Where(proxy => proxy is not null)

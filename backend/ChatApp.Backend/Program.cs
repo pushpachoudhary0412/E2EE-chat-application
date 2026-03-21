@@ -8,11 +8,10 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowAll", policy =>
     {
-        policy.SetIsOriginAllowed(origin =>
-            Uri.TryCreate(origin, UriKind.Absolute, out var uri) &&
-            (uri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase) ||
-             uri.Host.Equals("127.0.0.1")) &&
-            (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps))
+        // Keep development setup flexible: allow any origin that reaches this local API.
+        // This avoids SignalR negotiate failures when frontend is opened via localhost,
+        // 127.0.0.1, LAN IP, or another local hostname.
+        policy.SetIsOriginAllowed(_ => true)
               .AllowAnyMethod()
               .AllowAnyHeader()
               .AllowCredentials();

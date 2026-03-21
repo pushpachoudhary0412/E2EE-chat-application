@@ -14,6 +14,7 @@ public class ChatHub : Hub
 
     private static readonly ConcurrentDictionary<string, string> UserByConnectionId = new();
     private static readonly ConcurrentDictionary<string, ConcurrentDictionary<string, byte>> ConnectionsByUserId = new();
+    private static readonly ConcurrentDictionary<string, string> PrimaryConnectionByUserId = new();
     private static readonly ConcurrentDictionary<string, PresenceStatus> PresenceByUserId = new();
     private static readonly HashSet<string> AllowedMessageTypes = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -43,6 +44,7 @@ public class ChatHub : Hub
         UserByConnectionId[Context.ConnectionId] = userId;
         var connections = ConnectionsByUserId.GetOrAdd(userId, _ => new ConcurrentDictionary<string, byte>());
         connections[Context.ConnectionId] = 0;
+        PrimaryConnectionByUserId[userId] = Context.ConnectionId;
 
         var presence = new PresenceStatus
         {
@@ -75,12 +77,26 @@ public class ChatHub : Hub
             if (connections.IsEmpty)
             {
                 ConnectionsByUserId.TryRemove(userId, out _);
+                PrimaryConnectionByUserId.TryRemove(userId, out _);
 
                 if (PresenceByUserId.TryGetValue(userId, out var presence))
                 {
                     presence.Status = "offline";
                     presence.LastSeen = DateTime.UtcNow;
                     await Clients.Others.SendAsync("UserPresence", presence);
+                }
+            }
+            else if (PrimaryConnectionByUserId.TryGetValue(userId, out var primaryConnectionId) &&
+                     string.Equals(primaryConnectionId, Context.ConnectionId, StringComparison.Ordinal))
+            {
+                var nextPrimary = connections.Keys.FirstOrDefault();
+                if (!string.IsNullOrWhiteSpace(nextPrimary))
+                {
+                    PrimaryConnectionByUserId[userId] = nextPrimary;
+                }
+                else
+                {
+                    PrimaryConnectionByUserId.TryRemove(userId, out _);
                 }
             }
         }
@@ -233,7 +249,23 @@ public class ChatHub : Hub
             return null;
         }
 
-        return Clients.Clients(connections.Keys);
+        // Route to one stable active connection per user so presence and ACK flow
+        // stay predictable in this one-to-one challenge implementation.
+        if (PrimaryConnectionByUserId.TryGetValue(userId, out var primaryConnectionId) &&
+            !string.IsNullOrWhiteSpace(primaryConnectionId) &&
+            connections.ContainsKey(primaryConnectionId))
+        {
+            return Clients.Client(primaryConnectionId);
+        }
+
+        var fallbackConnectionId = connections.Keys.FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(fallbackConnectionId))
+        {
+            return null;
+        }
+
+        PrimaryConnectionByUserId[userId] = fallbackConnectionId;
+        return Clients.Client(fallbackConnectionId);
     }
 
     private Task SendProtocolErrorToCaller(ErrorMessage error)

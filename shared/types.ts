@@ -124,7 +124,7 @@ export function validateChatMessage(message: unknown): ChatMessage {
     throw new Error('Message data exceeds maximum allowed size.');
   }
 
-  if (messageId !== undefined && (typeof messageId !== 'string' || messageId.trim().length === 0)) {
+  if (messageId !== undefined && messageId !== null && (typeof messageId !== 'string' || messageId.trim().length === 0)) {
     throw new Error('messageId must be a non-empty string when provided.');
   }
 
@@ -145,7 +145,7 @@ export function validateChatMessage(message: unknown): ChatMessage {
     senderId,
     receiverId,
     data,
-    messageId,
+    messageId: messageId ?? undefined,
     timestamp,
     deliveredToOnline
   };

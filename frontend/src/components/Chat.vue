@@ -422,7 +422,6 @@ onMounted(async () => {
   try {
     await chatService.connect();
     isConnected.value = true;
-    await chatService.initiateHandshake();
     
     // Start inactivity tracking
     resetInactivityTimer();
