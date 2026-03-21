@@ -199,7 +199,7 @@ Covers:
 ### Backend tests (xUnit)
 
 ```bash
-/Users/pushpa/.dotnet/dotnet test /Users/pushpa/Desktop/E2EE_Chat_App/E2EE_Chat_App.sln
+dotnet test E2EE_Chat_App.sln
 ```
 
 Covers:
@@ -216,7 +216,7 @@ Covers:
 
 ```bash
 cd frontend && npm run build
-cd ../backend/ChatApp.Backend && /Users/pushpa/.dotnet/dotnet build
+cd ../backend/ChatApp.Backend && dotnet build
 ```
 
 ---
@@ -225,6 +225,7 @@ cd ../backend/ChatApp.Backend && /Users/pushpa/.dotnet/dotnet build
 
 - Keys are in-memory only (refresh/reconnect requires new handshake).
 - No long-term identity verification (not MITM-resistant yet).
+- User identity is demo-based (`user`/`peer` query or input), not authenticated accounts.
 - No encrypted offline message persistence.
 - Metadata visibility remains at server level (who talks to whom, when).
 - Single-instance in-memory presence/routing state on backend.
@@ -234,47 +235,47 @@ cd ../backend/ChatApp.Backend && /Users/pushpa/.dotnet/dotnet build
 ## 10) End-to-End Code Flow
 
 1. **Identity setup (demo mode)**
-   • `frontend/src/App.vue` reads `user` and `peer` from query params (or input fields) and starts a session.
+   - `frontend/src/App.vue` reads `user` and `peer` from query params (or input fields) and starts a session.
 
 2. **Realtime connection**
-   • `frontend/src/services/ChatService.ts` connects to SignalR hub:
-   • `http://localhost:5214/chatHub?userId=<userId>`
+   - `frontend/src/services/ChatService.ts` connects to SignalR hub:
+   - `http://localhost:5214/chatHub?userId=<userId>`
 
 3. **Secure handshake**
-   • Each client creates ephemeral ECDH keys (`frontend/src/utils/crypto.ts`).
-   • Clients exchange public keys through `handshake` protocol messages.
-   • Both derive the same shared AES-GCM key locally.
+   - Each client creates ephemeral ECDH keys (`frontend/src/utils/crypto.ts`).
+   - Clients exchange public keys through `handshake` protocol messages.
+   - Both derive the same shared AES-GCM key locally.
 
 4. **Sending a chat message**
-   • UI captures plaintext in `frontend/src/components/Chat.vue`.
-   • `ChatService` encrypts plaintext via `CryptoService`.
-   • Encrypted payload is wrapped into a `chat` envelope (`messageId` included) and sent to hub.
+   - UI captures plaintext in `frontend/src/components/Chat.vue`.
+   - `ChatService` encrypts plaintext via `CryptoService`.
+   - Encrypted payload is wrapped into a `chat` envelope (`messageId` included) and sent to hub.
 
 5. **Hub validation and routing**
-   • `backend/ChatApp.Backend/Hubs/ChatHub.cs` validates envelope fields, message type, payload size, sender mapping, and recipient status.
-   • If valid, it routes message only to intended receiver connection(s); otherwise returns safe `error` envelope.
+   - `backend/ChatApp.Backend/Hubs/ChatHub.cs` validates envelope fields, message type, payload size, sender mapping, and recipient status.
+   - If valid, it routes message only to intended receiver connection(s); otherwise returns safe `error` envelope.
 
 6. **Receiving and decrypting**
-   • Receiver `ChatService` validates envelope using shared protocol types (`shared/types.ts`).
-   • It decrypts chat payload locally in browser and pushes plaintext to UI.
+   - Receiver `ChatService` validates envelope using shared protocol types (`shared/types.ts`).
+   - It decrypts chat payload locally in browser and pushes plaintext to UI.
 
 7. **Delivery acknowledgement (ACK)**
-   • Receiver sends `ack` with same `messageId`.
-   • Sender marks message delivered in UI (`✓✓`) when ACK is received.
+   - Receiver sends `ack` with same `messageId`.
+   - Sender marks message delivered in UI (`✓✓`) when ACK is received.
 
 8. **Presence, typing, and errors**
-   • Presence updates flow via `UserPresence` events.
-   • Typing uses `typing` envelopes.
-   • Protocol/security failures are surfaced as safe error messages.
+   - Presence updates flow via `UserPresence` events.
+   - Typing uses `typing` envelopes.
+   - Protocol/security failures are surfaced as safe error messages.
 
 ### File responsibility map (quick reference)
 
-• `frontend/src/components/Chat.vue`: UI rendering, input handling, delivery state display.
-• `frontend/src/services/ChatService.ts`: SignalR orchestration, protocol send/receive, handshake lifecycle.
-• `frontend/src/utils/crypto.ts`: ECDH key generation/derivation and AES-GCM encrypt/decrypt.
-• `backend/ChatApp.Backend/Hubs/ChatHub.cs`: server-side validation, routing, presence broadcast.
-• `backend/ChatApp.Backend/Models/Message.cs`: protocol model types.
-• `shared/types.ts`: shared protocol schema + runtime validation/parsing.
+- `frontend/src/components/Chat.vue`: UI rendering, input handling, delivery state display.
+- `frontend/src/services/ChatService.ts`: SignalR orchestration, protocol send/receive, handshake lifecycle.
+- `frontend/src/utils/crypto.ts`: ECDH key generation/derivation and AES-GCM encrypt/decrypt.
+- `backend/ChatApp.Backend/Hubs/ChatHub.cs`: server-side validation, routing, presence broadcast.
+- `backend/ChatApp.Backend/Models/Message.cs`: protocol model types.
+- `shared/types.ts`: shared protocol schema + runtime validation/parsing.
 
 ---
 
