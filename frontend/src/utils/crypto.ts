@@ -1,5 +1,9 @@
 import type { CryptoKeys, EncryptedData } from '../../../shared/types';
 
+/**
+ * Browser crypto utility for generating ECDH keys, deriving shared AES-GCM secrets,
+ * and performing message encryption/decryption for end-to-end chat security.
+ */
 export class CryptoService {
   private static instance: CryptoService;
   private keys: CryptoKeys | null = null;

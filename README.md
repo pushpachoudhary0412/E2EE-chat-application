@@ -100,6 +100,7 @@ Every message sent in the app has the same basic fields:
 - **senderId** → who sent it
 - **receiverId** → who should receive it
 - **data** → the actual content for that event
+- **messageId** → unique ID for `chat`/`ack` flow
 - **timestamp** → when it was created
 
 The `type` can be one of these:
@@ -108,6 +109,7 @@ The `type` can be one of these:
 - `handshake` → shares public key info to create the secure session
 - `chat` → carries the encrypted chat payload
 - `typing` → tells the peer typing started/stopped
+- `ack` → confirms receiver processed a specific `chat` message
 - `error` → safe protocol error returned by server
 
 For normal understanding, that’s enough: **the same envelope is reused for all events, and only the `data` content changes by type**.
@@ -116,13 +118,14 @@ Presence (`online`, `offline`, `inactive`) is sent separately through the `UserP
 
 ### Quick message type guide
 
-| Message Type | Purpose |
-| --- | --- |
-| `connect` | Starts peer session signal (“I’m connected”). |
-| `handshake` | Exchanges public key information to establish a secure session. |
-| `chat` | Carries encrypted chat payload (`ciphertext` + `iv`). |
-| `typing` | Sends typing on/off state to the peer. |
-| `error` | Returns safe protocol errors from server validation. |
+| Type | Direction | `data` shape | Requires `messageId` | Purpose |
+| --- | --- | --- | --- | --- |
+| `connect` | Client → Hub → Peer | `{"status":"connected"}` | No | Signals peer availability and triggers handshake sequence. |
+| `handshake` | Client ↔ Peer (via Hub) | `{"publicKey":"...","reply":boolean}` | No | Exchanges ECDH public keys to derive shared secret. |
+| `chat` | Client → Hub → Peer | `{"ciphertext":"...","iv":"...","tag":""}` | Yes | Carries encrypted chat payload. |
+| `typing` | Client → Hub → Peer | `{"isTyping":boolean}` | No | Indicates typing start/stop state. |
+| `ack` | Receiver → Hub → Sender | `{"messageId":"..."}` | Yes | Confirms receiver processed/decrypted specific chat message. |
+| `error` | Hub → Caller | `{"errorCode":"...","message":"..."}` | No | Returns safe protocol validation/routing errors. |
 
 > If you want full developer-level schema details, see `shared/types.ts`.
 
@@ -166,10 +169,13 @@ Server cannot see:
 ## 7) Reliability and validation behavior
 
 - Hub validates message type and required fields (`type`, `senderId`, `receiverId`, `data`).
+- Hub enforces maximum protocol payload size (`data` max length: `8192` chars).
+- `chat` and `ack` messages require non-empty `messageId`.
 - Sender identity is checked against connection mapping.
 - Offline recipient handling returns safe protocol errors.
 - Disconnects update presence state and do not crash hub.
 - Client performs runtime validation/parsing for protocol payloads and rejects malformed JSON safely.
+- Delivery indicator now uses explicit ACK (`✓` sent, `✓✓` acknowledged).
 
 ---
 
@@ -188,7 +194,7 @@ Covers:
 - invalid key handling
 - tamper detection (ciphertext/IV)
 - wrong-key decryption failure
-- protocol parsing/validation and malformed payload rejection
+- protocol parsing/validation, malformed payload rejection, messageId requirement, and payload-size guard
 
 ### Backend tests (xUnit)
 
@@ -204,6 +210,7 @@ Covers:
 - chat/connect/typing forwarding
 - presence update validation
 - disconnect/offline transitions
+- messageId validation and payload-size rejection
 
 ### Optional build checks
 
@@ -224,14 +231,59 @@ cd ../backend/ChatApp.Backend && /Users/pushpa/.dotnet/dotnet build
 
 ---
 
-## 10) What I would improve next
+## 10) End-to-End Code Flow
 
-1. Add signed long-term identity keys + fingerprint verification.
-2. Add explicit message IDs and delivery ACK protocol.
-3. Add Playwright two-client integration tests.
-4. Add encrypted offline persistence and replay sync.
-5. Replace query-string demo identities with authenticated users.
-6. Add rate limits and payload-size safeguards.
+1. **Identity setup (demo mode)**
+   • `frontend/src/App.vue` reads `user` and `peer` from query params (or input fields) and starts a session.
+
+2. **Realtime connection**
+   • `frontend/src/services/ChatService.ts` connects to SignalR hub:
+   • `http://localhost:5214/chatHub?userId=<userId>`
+
+3. **Secure handshake**
+   • Each client creates ephemeral ECDH keys (`frontend/src/utils/crypto.ts`).
+   • Clients exchange public keys through `handshake` protocol messages.
+   • Both derive the same shared AES-GCM key locally.
+
+4. **Sending a chat message**
+   • UI captures plaintext in `frontend/src/components/Chat.vue`.
+   • `ChatService` encrypts plaintext via `CryptoService`.
+   • Encrypted payload is wrapped into a `chat` envelope (`messageId` included) and sent to hub.
+
+5. **Hub validation and routing**
+   • `backend/ChatApp.Backend/Hubs/ChatHub.cs` validates envelope fields, message type, payload size, sender mapping, and recipient status.
+   • If valid, it routes message only to intended receiver connection(s); otherwise returns safe `error` envelope.
+
+6. **Receiving and decrypting**
+   • Receiver `ChatService` validates envelope using shared protocol types (`shared/types.ts`).
+   • It decrypts chat payload locally in browser and pushes plaintext to UI.
+
+7. **Delivery acknowledgement (ACK)**
+   • Receiver sends `ack` with same `messageId`.
+   • Sender marks message delivered in UI (`✓✓`) when ACK is received.
+
+8. **Presence, typing, and errors**
+   • Presence updates flow via `UserPresence` events.
+   • Typing uses `typing` envelopes.
+   • Protocol/security failures are surfaced as safe error messages.
+
+### File responsibility map (quick reference)
+
+• `frontend/src/components/Chat.vue`: UI rendering, input handling, delivery state display.
+• `frontend/src/services/ChatService.ts`: SignalR orchestration, protocol send/receive, handshake lifecycle.
+• `frontend/src/utils/crypto.ts`: ECDH key generation/derivation and AES-GCM encrypt/decrypt.
+• `backend/ChatApp.Backend/Hubs/ChatHub.cs`: server-side validation, routing, presence broadcast.
+• `backend/ChatApp.Backend/Models/Message.cs`: protocol model types.
+• `shared/types.ts`: shared protocol schema + runtime validation/parsing.
+
+---
+
+## 11) What I would improve next
+
+1. Replace query-string demo users with proper authentication (login + token/session-based identity).
+2. Add persistent encrypted chat history (e.g., IndexedDB) so messages survive refresh/reconnect.
+3. Extend one-to-one chat into optional group chat using room-based messaging and membership handling.
+4. Enhance messaging capabilities with encrypted file/image attachments, message edit/delete support, and chat history search/filter.
 
 ---
 

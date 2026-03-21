@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  MAX_PROTOCOL_DATA_LENGTH,
+  parseAckPayload,
   parseConnectPayload,
   parseEncryptedData,
   parseHandshakePayload,
@@ -16,6 +18,7 @@ describe('protocol validation', () => {
       senderId: 'alice',
       receiverId: 'bob',
       data: '{"ciphertext":"abc","iv":"def","tag":""}',
+      messageId: 'msg-1',
       timestamp: new Date().toISOString()
     });
 
@@ -30,9 +33,35 @@ describe('protocol validation', () => {
         senderId: 'alice',
         receiverId: 'bob',
         data: 'x',
+        messageId: 'msg-1',
         timestamp: new Date().toISOString()
       })
     ).toThrow('Message type is invalid.');
+  });
+
+  it('rejects chat messages without messageId', () => {
+    expect(() =>
+      validateChatMessage({
+        type: 'chat',
+        senderId: 'alice',
+        receiverId: 'bob',
+        data: '{"ciphertext":"abc","iv":"def","tag":""}',
+        timestamp: new Date().toISOString()
+      })
+    ).toThrow('messageId is required for chat and ack messages.');
+  });
+
+  it('rejects oversized payloads', () => {
+    expect(() =>
+      validateChatMessage({
+        type: 'chat',
+        senderId: 'alice',
+        receiverId: 'bob',
+        data: 'x'.repeat(MAX_PROTOCOL_DATA_LENGTH + 1),
+        messageId: 'msg-oversize',
+        timestamp: new Date().toISOString()
+      })
+    ).toThrow('Message data exceeds maximum allowed size.');
   });
 
   it('parses a valid connect payload', () => {
@@ -85,6 +114,14 @@ describe('protocol validation', () => {
 
     expect(payload.errorCode).toBe('INVALID_TYPE');
     expect(payload.message).toBe('Message type is invalid.');
+  });
+
+  it('parses ack payloads', () => {
+    const payload = parseAckPayload(JSON.stringify({
+      messageId: 'msg-123'
+    }));
+
+    expect(payload.messageId).toBe('msg-123');
   });
 
   it('rejects encrypted payloads missing required fields', () => {

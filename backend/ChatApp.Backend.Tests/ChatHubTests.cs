@@ -8,6 +8,10 @@ using Xunit;
 
 namespace ChatApp.Backend.Tests;
 
+/// <summary>
+/// Unit tests for ChatHub covering validation, routing, presence updates,
+/// and disconnect behavior in a controlled in-memory SignalR setup.
+/// </summary>
 public class ChatHubTests
 {
     [Fact]
@@ -45,7 +49,8 @@ public class ChatHubTests
             Type = "chat",
             SenderId = "mallory",
             ReceiverId = "bob",
-            Data = "ciphertext"
+            Data = "ciphertext",
+            MessageId = "msg-1"
         });
 
         var error = AssertProtocolMessage(caller, "ReceiveMessage", "error");
@@ -66,7 +71,8 @@ public class ChatHubTests
             Type = "chat",
             SenderId = "alice",
             ReceiverId = "bob",
-            Data = "ciphertext"
+            Data = "ciphertext",
+            MessageId = "msg-2"
         });
 
         var error = AssertProtocolMessage(caller, "ReceiveMessage", "error");
@@ -98,7 +104,8 @@ public class ChatHubTests
             Type = "chat",
             SenderId = "alice",
             ReceiverId = "bob",
-            Data = "{\"ciphertext\":\"abc\",\"iv\":\"def\",\"tag\":\"\"}"
+            Data = "{\"ciphertext\":\"abc\",\"iv\":\"def\",\"tag\":\"\"}",
+            MessageId = "msg-3"
         };
 
         await aliceHub.SendMessage(message);
@@ -106,6 +113,49 @@ public class ChatHubTests
         var forwarded = AssertSinglePayload<ChatMessage>(bobCaller, "ReceiveMessage");
         Assert.Equal(message.Data, forwarded.Data);
         Assert.DoesNotContain(aliceCaller.Messages, m => m.Method == "ReceiveMessage" && IsErrorMessage(m));
+    }
+
+    [Fact]
+    public async Task SendMessage_ChatWithoutMessageId_SendsErrorToCaller()
+    {
+        ResetHubState();
+        var caller = new RecordingClientProxy();
+        const string connectionId = "alice-conn";
+        var hub = CreateHub(connectionId, caller);
+
+        SeedConnectedUser("alice", connectionId);
+        await hub.SendMessage(new ChatMessage
+        {
+            Type = "chat",
+            SenderId = "alice",
+            ReceiverId = "bob",
+            Data = "ciphertext"
+        });
+
+        var error = AssertProtocolMessage(caller, "ReceiveMessage", "error");
+        Assert.Contains("\"errorCode\":\"INVALID_MESSAGE_ID\"", error.Data);
+    }
+
+    [Fact]
+    public async Task SendMessage_PayloadTooLarge_SendsErrorToCaller()
+    {
+        ResetHubState();
+        var caller = new RecordingClientProxy();
+        const string connectionId = "alice-conn";
+        var hub = CreateHub(connectionId, caller);
+
+        SeedConnectedUser("alice", connectionId);
+        await hub.SendMessage(new ChatMessage
+        {
+            Type = "chat",
+            SenderId = "alice",
+            ReceiverId = "bob",
+            MessageId = "msg-too-large",
+            Data = new string('x', 9000)
+        });
+
+        var error = AssertProtocolMessage(caller, "ReceiveMessage", "error");
+        Assert.Contains("\"errorCode\":\"PAYLOAD_TOO_LARGE\"", error.Data);
     }
 
     [Fact]
@@ -318,6 +368,9 @@ public class ChatHubTests
         return (T)value;
     }
 
+    /// <summary>
+    /// Test double that records hub client invocations for later assertions.
+    /// </summary>
     private sealed class RecordingClientProxy : IClientProxy
     {
         public List<ClientInvocation> Messages { get; } = [];
@@ -329,8 +382,15 @@ public class ChatHubTests
         }
     }
 
+    /// <summary>
+    /// Captured method call sent by the hub to a client proxy.
+    /// </summary>
     private sealed record ClientInvocation(string Method, object?[] Arguments);
 
+    /// <summary>
+    /// Minimal implementation of IHubCallerClients used to route messages
+    /// to caller/others/specific connection proxies during tests.
+    /// </summary>
     private sealed class TestHubCallerClients(
         RecordingClientProxy caller,
         RecordingClientProxy others,
@@ -364,6 +424,10 @@ public class ChatHubTests
         public IClientProxy Users(IReadOnlyList<string> userIds) => throw new NotSupportedException();
     }
 
+    /// <summary>
+    /// Composite client proxy that forwards the same invocation
+    /// to multiple recording client proxies.
+    /// </summary>
     private sealed class MultiClientProxy(params RecordingClientProxy[] proxies) : IClientProxy
     {
         public Task SendCoreAsync(string method, object?[] args, CancellationToken cancellationToken = default)
@@ -377,6 +441,10 @@ public class ChatHubTests
         }
     }
 
+    /// <summary>
+    /// Lightweight HubCallerContext implementation for unit testing hub methods
+    /// without an actual SignalR transport.
+    /// </summary>
     private sealed class TestHubCallerContext(string connectionId) : HubCallerContext
     {
         private readonly IDictionary<object, object?> _items = new Dictionary<object, object?>();

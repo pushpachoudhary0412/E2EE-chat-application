@@ -4,8 +4,14 @@ using System.Collections.Concurrent;
 
 namespace ChatApp.Backend.Hubs;
 
+/// <summary>
+/// SignalR hub responsible for validating protocol envelopes, routing messages,
+/// and broadcasting user presence updates between connected chat peers.
+/// </summary>
 public class ChatHub : Hub
 {
+    private const int MaxProtocolDataLength = 8192;
+
     private static readonly ConcurrentDictionary<string, string> UserByConnectionId = new();
     private static readonly ConcurrentDictionary<string, ConcurrentDictionary<string, byte>> ConnectionsByUserId = new();
     private static readonly ConcurrentDictionary<string, PresenceStatus> PresenceByUserId = new();
@@ -15,6 +21,7 @@ public class ChatHub : Hub
         "handshake",
         "chat",
         "typing",
+        "ack",
         "error"
     };
     private static readonly HashSet<string> AllowedPresenceStatuses = new(StringComparer.OrdinalIgnoreCase)
@@ -189,6 +196,28 @@ public class ChatHub : Hub
             {
                 ErrorCode = "INVALID_DATA",
                 Message = "Message data is required."
+            };
+            return false;
+        }
+
+        if (message.Data.Length > MaxProtocolDataLength)
+        {
+            error = new ErrorMessage
+            {
+                ErrorCode = "PAYLOAD_TOO_LARGE",
+                Message = $"Message data exceeds max allowed length of {MaxProtocolDataLength} characters."
+            };
+            return false;
+        }
+
+        if ((string.Equals(message.Type, "chat", StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(message.Type, "ack", StringComparison.OrdinalIgnoreCase)) &&
+            string.IsNullOrWhiteSpace(message.MessageId))
+        {
+            error = new ErrorMessage
+            {
+                ErrorCode = "INVALID_MESSAGE_ID",
+                Message = "messageId is required for chat and ack messages."
             };
             return false;
         }

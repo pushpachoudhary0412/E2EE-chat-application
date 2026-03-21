@@ -1,6 +1,8 @@
 import { HubConnection, HubConnectionBuilder, LogLevel } from '@microsoft/signalr';
 import { CryptoService } from '../utils/crypto';
 import {
+  MAX_PROTOCOL_DATA_LENGTH,
+  parseAckPayload,
   parseConnectPayload,
   parseEncryptedData,
   parseHandshakePayload,
@@ -17,13 +19,16 @@ import {
   type PresenceStatus
 } from '../../../shared/types';
 
+/**
+ * Frontend real-time orchestration layer that manages SignalR connection,
+ * E2EE handshake lifecycle, encrypted message exchange, and chat-related callbacks.
+ */
 export class ChatService {
   private connection: HubConnection | null = null;
   private readonly cryptoService = CryptoService.getInstance();
   private readonly userId: string;
   private readonly otherUserId: string;
   private sharedSecret: CryptoKey | null = null;
-  private otherUserOnline = false;
   private handshakeStarted = false;
   private handshakeComplete = false;
 
@@ -34,6 +39,7 @@ export class ChatService {
   public onError?: (error: string) => void;
   public onHandshakeComplete?: () => void;
   public onConnectionStateChange?: (connected: boolean) => void;
+  public onMessageAcknowledged?: (messageId: string) => void;
 
   constructor(userId: string, otherUserId: string) {
     this.userId = userId;
@@ -73,16 +79,18 @@ export class ChatService {
       throw new Error('Secure session has not been established yet.');
     }
 
+    const messageId = this.generateMessageId();
     const encryptedData = await this.cryptoService.encryptMessage(text, this.sharedSecret);
-    await this.sendProtocolMessage('chat', encryptedData);
+    await this.sendProtocolMessage('chat', encryptedData, messageId);
 
     this.onMessageReceived?.({
       type: 'chat',
       senderId: this.userId,
       receiverId: this.otherUserId,
       data: text,
+      messageId,
       timestamp: new Date(),
-      deliveredToOnline: this.otherUserOnline
+      deliveredToOnline: false
     });
   }
 
@@ -157,6 +165,12 @@ export class ChatService {
           return;
         }
 
+        if (validatedMessage.type === 'ack') {
+          const ackPayload = parseAckPayload(validatedMessage.data);
+          this.onMessageAcknowledged?.(ackPayload.messageId);
+          return;
+        }
+
         if (validatedMessage.type !== 'chat' || !this.sharedSecret) {
           return;
         }
@@ -169,6 +183,10 @@ export class ChatService {
           data: decryptedText,
           timestamp: new Date(validatedMessage.timestamp)
         });
+
+        if (validatedMessage.messageId) {
+          await this.sendProtocolMessage('ack', { messageId: validatedMessage.messageId }, validatedMessage.messageId);
+        }
       } catch (error) {
         console.error('Failed to process message:', error);
         this.onError?.('Failed to process an incoming secure message.');
@@ -182,7 +200,6 @@ export class ChatService {
         return;
       }
 
-      this.otherUserOnline = validatedPresence.status === 'online' || validatedPresence.status === 'inactive';
       this.onPresenceUpdate?.({
         ...validatedPresence,
         lastSeen: new Date(validatedPresence.lastSeen)
@@ -238,7 +255,8 @@ export class ChatService {
 
   private async sendProtocolMessage(
     type: MessageType,
-    payload: ConnectPayload | HandshakePayload | EncryptedData | { isTyping: boolean }
+    payload: ConnectPayload | HandshakePayload | EncryptedData | { isTyping: boolean } | { messageId: string },
+    messageId?: string
   ): Promise<void> {
     if (type === 'error') {
       throw new Error('Clients cannot send protocol error messages.');
@@ -248,14 +266,28 @@ export class ChatService {
       throw new Error('Not connected');
     }
 
+    const serializedPayload = JSON.stringify(payload);
+    if (serializedPayload.length > MAX_PROTOCOL_DATA_LENGTH) {
+      throw new Error(`Message payload too large. Max allowed size is ${MAX_PROTOCOL_DATA_LENGTH} characters.`);
+    }
+
     const message: ChatMessage = {
       type,
       senderId: this.userId,
       receiverId: this.otherUserId,
-      data: JSON.stringify(payload),
+      data: serializedPayload,
+      messageId,
       timestamp: new Date()
     };
 
     await this.connection.invoke('SendMessage', message);
+  }
+
+  private generateMessageId(): string {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID();
+    }
+
+    return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
   }
 }

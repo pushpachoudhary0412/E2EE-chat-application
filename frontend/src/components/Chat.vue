@@ -147,7 +147,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, nextTick, watch } from 'vue';
+import { ref, onMounted, onUnmounted, nextTick } from 'vue';
 import { ChatService } from '../services/ChatService';
 import type { ChatMessage, PresenceStatus } from '../../../shared/types';
 
@@ -244,22 +244,23 @@ const getGroupedReactions = (reactions: MessageReaction[]) => {
   return Object.values(grouped);
 };
 
-// Preserve historical delivery state:
-// if recipient is online/inactive at any point, mark all sent messages as delivered.
-watch(otherUserPresence, (presence) => {
-  if (!presence) return;
-
-  const recipientAvailable = presence.status === 'online' || presence.status === 'inactive';
-  if (!recipientAvailable) return;
-
-  messages.value.forEach((message) => {
-    if (message.senderId === props.userId) {
-      message.deliveredToOnline = true;
-    }
-  });
-});
-
 let chatService: ChatService;
+
+const mapProtocolErrorToUiMessage = (err: string) => {
+  if (err.includes('Recipient is not connected')) {
+    return 'Recipient is offline. Your secure message could not be delivered.';
+  }
+
+  if (err.includes('Message data exceeds max allowed length') || err.includes('Message data exceeds maximum allowed size')) {
+    return 'Message is too long. Please send a shorter message.';
+  }
+
+  if (err.includes('messageId is required')) {
+    return 'Message could not be processed due to a protocol issue.';
+  }
+
+  return err;
+};
 
 const resetInactivityTimer = () => {
   if (!chatService) return;
@@ -304,27 +305,24 @@ const sendMessage = async () => {
   try {
     await chatService.sendMessage(newMessage.value.trim());
     newMessage.value = '';
+    error.value = '';
     chatService.stopTyping();
     
     // Reset inactivity timer when sending a message
     resetInactivityTimer();
   } catch (err) {
-    error.value = 'Failed to send message';
+    error.value = err instanceof Error ? mapProtocolErrorToUiMessage(err.message) : 'Failed to send message';
   }
 };
 
 const getDeliveryStatus = (message: ChatMessage) => {
   // For messages we sent
   if (message.senderId === props.userId) {
-    // Once delivered to an online user, keep double tick permanently
-    // Check if this message was ever delivered to an online recipient
     if (message.deliveredToOnline ?? false) {
-      return '✓✓'; // Double tick - delivered to online user (permanent)
-    } else if (otherUserPresence.value?.status === 'online' || otherUserPresence.value?.status === 'inactive') {
-      return '✓✓'; // Double tick - delivered (recipient online now)
-    } else {
-      return '✓'; // Single tick - sent but not delivered yet
+      return '✓✓'; // Ack received
     }
+
+    return '✓'; // Sent but ack not received yet
   }
   return '';
 };
@@ -403,7 +401,17 @@ onMounted(async () => {
   };
 
   chatService.onError = (err) => {
-    error.value = err;
+    error.value = mapProtocolErrorToUiMessage(err);
+  };
+
+  chatService.onMessageAcknowledged = (messageId) => {
+    const message = messages.value.find(
+      (m) => m.senderId === props.userId && m.messageId === messageId
+    );
+
+    if (message) {
+      message.deliveredToOnline = true;
+    }
   };
 
   chatService.onHandshakeComplete = () => {

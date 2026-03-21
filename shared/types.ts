@@ -1,10 +1,13 @@
-export type MessageType = 'connect' | 'handshake' | 'chat' | 'typing' | 'error';
+export type MessageType = 'connect' | 'handshake' | 'chat' | 'typing' | 'ack' | 'error';
+
+export const MAX_PROTOCOL_DATA_LENGTH = 8192;
 
 const MESSAGE_TYPES: ReadonlySet<MessageType> = new Set([
   'connect',
   'handshake',
   'chat',
   'typing',
+  'ack',
   'error'
 ]);
 
@@ -19,6 +22,7 @@ export interface ChatMessage {
   senderId: string;
   receiverId: string;
   data: string; // Encrypted for chat messages
+  messageId?: string;
   timestamp: Date | string;
   deliveredToOnline?: boolean; // Tracks if message was delivered to an online recipient
 }
@@ -45,6 +49,10 @@ export interface ConnectPayload {
 
 export interface TypingPayload {
   isTyping: boolean;
+}
+
+export interface AckPayload {
+  messageId: string;
 }
 
 export interface ProtocolErrorPayload {
@@ -94,6 +102,7 @@ export function validateChatMessage(message: unknown): ChatMessage {
   }
 
   const { type, senderId, receiverId, data, timestamp, deliveredToOnline } = message;
+  const messageId = message.messageId;
 
   if (!isMessageType(type)) {
     throw new Error('Message type is invalid.');
@@ -111,6 +120,18 @@ export function validateChatMessage(message: unknown): ChatMessage {
     throw new Error('Message data is required.');
   }
 
+  if (data.length > MAX_PROTOCOL_DATA_LENGTH) {
+    throw new Error('Message data exceeds maximum allowed size.');
+  }
+
+  if (messageId !== undefined && (typeof messageId !== 'string' || messageId.trim().length === 0)) {
+    throw new Error('messageId must be a non-empty string when provided.');
+  }
+
+  if ((type === 'chat' || type === 'ack') && (typeof messageId !== 'string' || messageId.trim().length === 0)) {
+    throw new Error('messageId is required for chat and ack messages.');
+  }
+
   if (!(timestamp instanceof Date) && typeof timestamp !== 'string') {
     throw new Error('Timestamp must be a Date or ISO string.');
   }
@@ -124,6 +145,7 @@ export function validateChatMessage(message: unknown): ChatMessage {
     senderId,
     receiverId,
     data,
+    messageId,
     timestamp,
     deliveredToOnline
   };
@@ -217,6 +239,17 @@ export function parseTypingPayload(raw: string): TypingPayload {
   }
 
   return { isTyping };
+}
+
+export function parseAckPayload(raw: string): AckPayload {
+  const parsed = parseJsonObject(raw, 'Ack payload');
+  const { messageId } = parsed;
+
+  if (typeof messageId !== 'string' || messageId.trim().length === 0) {
+    throw new Error('Ack payload messageId is required.');
+  }
+
+  return { messageId };
 }
 
 export function parseProtocolErrorPayload(raw: string): ProtocolErrorPayload {
