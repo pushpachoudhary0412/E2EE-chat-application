@@ -66,7 +66,7 @@ shared/
 ```bash
 cd backend/ChatApp.Backend
 dotnet restore
-dotnet run
+dotnet run --urls http://localhost:5214
 ```
 
 Default backend URL in this project: `http://localhost:5214`
@@ -81,12 +81,20 @@ npm run dev
 
 Frontend URL: `http://localhost:5173`
 
-If your backend runs on a different URL, create `frontend/.env.local`:
+If you want to run the backend on a different URL, you can start it normally, for example:
+
+```bash
+dotnet run
+```
+
+Then create `frontend/.env.local`:
 
 ```bash
 cd frontend
 cp .env.example .env.local
 ```
+
+`.env.example` is only a template. Keep it unchanged and put your machine-specific override in `frontend/.env.local`.
 
 Then set:
 
