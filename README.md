@@ -66,13 +66,12 @@ shared/
 ```bash
 cd backend/ChatApp.Backend
 dotnet restore
-dotnet run --launch-profile http
+dotnet run --urls http://localhost:5214
 ```
 
 Backend URL: `http://localhost:5214`
 
-If your machine starts the backend on a different host/port (for example a Windows HTTPS profile),
-set the frontend API base URL before starting Vite.
+If you use a different backend URL on your machine, update the frontend to match it before starting Vite.
 
 ### Run frontend
 
@@ -91,16 +90,22 @@ cd frontend
 cp .env.example .env.local
 ```
 
-Then set:
+Then update `frontend/.env.local` and set:
 
 ```bash
 VITE_API_BASE_URL=http://localhost:5214
 ```
 
-or whatever backend URL your local machine is actually using, such as:
+Use the actual backend URL your machine is running, for example:
 
 ```bash
 VITE_API_BASE_URL=https://localhost:7152
+```
+
+If you are unsure which backend URL to use, check the backend terminal output and copy the value shown in:
+
+```text
+Now listening on: ...
 ```
 
 ### Open two users
