@@ -112,10 +112,20 @@ Now listening on: ...
 
 Use two tabs/windows:
 
-- User A: `http://localhost:5173/?user=alice&peer=bob`
-- User B: `http://localhost:5173/?user=bob&peer=alice`
+- User A: `http://localhost:5173`
+- User B: `http://localhost:5173`
 
-After both connect, a handshake runs automatically and secure messaging is enabled.
+Then either:
+
+- keep the generated default user IDs shown in the setup screen and enter the opposite peer ID in the other tab, or
+- manually enter your own pair such as `alice` -> `bob` in one tab and `bob` -> `alice` in the other
+
+You can also still open the app with query parameters directly if you prefer:
+
+- `http://localhost:5173/?user=alice&peer=bob`
+- `http://localhost:5173/?user=bob&peer=alice`
+
+After both peers connect, a handshake runs automatically and secure messaging is enabled.
 
 ---
 
