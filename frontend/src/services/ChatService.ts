@@ -19,6 +19,13 @@ import {
   type PresenceStatus
 } from '../../../shared/types';
 
+const DEFAULT_API_BASE_URL = 'http://localhost:5214';
+
+function getApiBaseUrl(): string {
+  const configuredUrl = import.meta.env.VITE_API_BASE_URL?.trim();
+  return (configuredUrl && configuredUrl.length > 0 ? configuredUrl : DEFAULT_API_BASE_URL).replace(/\/$/, '');
+}
+
 /**
  * Frontend real-time orchestration layer that manages SignalR connection,
  * E2EE handshake lifecycle, encrypted message exchange, and chat-related callbacks.
@@ -48,9 +55,10 @@ export class ChatService {
 
   async connect(): Promise<void> {
     await this.cryptoService.generateKeyPair();
+    const apiBaseUrl = getApiBaseUrl();
 
     this.connection = new HubConnectionBuilder()
-      .withUrl(`http://localhost:5214/chatHub?userId=${encodeURIComponent(this.userId)}`)
+      .withUrl(`${apiBaseUrl}/chatHub?userId=${encodeURIComponent(this.userId)}`)
       .withAutomaticReconnect()
       .configureLogging(LogLevel.Information)
       .build();
