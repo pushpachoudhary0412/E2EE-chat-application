@@ -30,6 +30,10 @@
       <div class="encryption-notice">
         <span>🔒 Chats are end-to-end encrypted. Only people in this chat can read them.</span>
       </div>
+
+      <div v-if="showWaitingForPeerMessage" class="empty-state-note">
+        Waiting for {{ props.otherUserId }} to connect.
+      </div>
       
       <div
         v-for="(message, index) in messages"
@@ -147,7 +151,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, nextTick } from 'vue';
+import { computed, ref, onMounted, onUnmounted, nextTick } from 'vue';
 import { ChatService } from '../services/ChatService';
 import type { ChatMessage, PresenceStatus } from '../../../shared/types';
 
@@ -352,6 +356,12 @@ const formatTime = (date: Date | string) => {
   return normalizedDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 };
 
+const showWaitingForPeerMessage = computed(() =>
+  messages.value.length === 0 &&
+  !isSecureSessionReady.value &&
+  (!otherUserPresence.value || otherUserPresence.value.status === 'offline')
+);
+
 const scrollToBottom = () => {
   nextTick(() => {
     if (messagesContainer.value) {
@@ -510,6 +520,16 @@ onUnmounted(() => {
 .chat-header h2::before {
   content: '🔒';
   font-size: 20px;
+}
+
+.empty-state-note {
+  margin: 8px auto 0;
+  padding: 10px 16px;
+  border-radius: 999px;
+  background: rgba(102, 126, 234, 0.1);
+  color: #4c63d2;
+  font-size: 14px;
+  font-weight: 600;
 }
 
 .presence {
