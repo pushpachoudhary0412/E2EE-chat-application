@@ -66,12 +66,10 @@ shared/
 ```bash
 cd backend/ChatApp.Backend
 dotnet restore
-dotnet run --urls http://localhost:5214
+dotnet run
 ```
 
-Backend URL: `http://localhost:5214`
-
-If you use a different backend URL on your machine, update the frontend to match it before starting Vite.
+Default backend URL in this project: `http://localhost:5214`
 
 ### Run frontend
 
@@ -83,29 +81,23 @@ npm run dev
 
 Frontend URL: `http://localhost:5173`
 
-Optional frontend environment override:
+If your backend runs on a different URL, create `frontend/.env.local`:
 
 ```bash
 cd frontend
 cp .env.example .env.local
 ```
 
-Then update `frontend/.env.local` and set:
+Then set:
 
 ```bash
 VITE_API_BASE_URL=http://localhost:5214
 ```
 
-Use the actual backend URL your machine is running, for example:
+Use the actual backend URL shown in the backend terminal `Now listening on: ...` output, for example:
 
 ```bash
 VITE_API_BASE_URL=https://localhost:7152
-```
-
-If you are unsure which backend URL to use, check the backend terminal output and copy the value shown in:
-
-```text
-Now listening on: ...
 ```
 
 ### Open two users
@@ -115,10 +107,7 @@ Use two tabs/windows:
 - User A: `http://localhost:5173`
 - User B: `http://localhost:5173`
 
-Then either:
-
-- keep the generated default user IDs shown in the setup screen and enter the opposite peer ID in the other tab, or
-- manually enter your own pair such as `alice` -> `bob` in one tab and `bob` -> `alice` in the other
+Then either keep the generated default user IDs shown in the setup screen and enter the opposite peer ID in the other tab, or manually enter your own pair such as `alice` -> `bob` in one tab and `bob` -> `alice` in the other.
 
 You can also still open the app with query parameters directly if you prefer:
 
